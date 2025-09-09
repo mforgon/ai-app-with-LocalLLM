@@ -41,7 +41,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
     
     // Format amenities data for the system prompt
     const amenitiesData = amenities.map(amenity => {
-      return `- ${amenity.name}: ${amenity.description} (Category: ${amenity.category}, Available: ${amenity.available ? 'Yes' : 'No'})`;
+      return `- ${amenity.name}: ${amenity.description} (Category: ${amenity.category}, Location: ${amenity.location || 'Not specified'}, Available: ${amenity.availability ? 'Yes' : 'No'})`;
     }).join('\n');
 
     // Add hospitality-focused system prompt with amenities data
