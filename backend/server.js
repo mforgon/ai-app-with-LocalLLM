@@ -9,11 +9,13 @@ const app = express();
 const PORT = process.env.PORT;
 
 // Middleware
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 app.use(express.json());
 
 // Ollama API endpoint
@@ -101,21 +103,7 @@ app.get("/api/test", (req, res) => {
 });
 
 // Options for preflight requests
-app.options('*', cors());
-
-// Models list endpoint
-app.get("/api/models", async (req, res) => {
-  try {
-    const response = await axios.get(`${OLLAMA_API}/tags`);
-    return res.json(response.data);
-  } catch (error) {
-    console.error("Error fetching models:", error.message);
-    return res.status(500).json({
-      error: "Failed to fetch models",
-      details: error.message,
-    });
-  }
-});
+app.options("*", cors());
 
 // Start the server
 app.listen(PORT, () => {
