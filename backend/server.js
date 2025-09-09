@@ -6,10 +6,14 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Ollama API endpoint
@@ -42,13 +46,45 @@ Your goal is to make users feel valued and well-cared for, as if they were guest
 
     const fullPrompt = `<system>${systemPrompt}</system>\n\n${prompt}`;
 
-    const response = await axios.post(`${OLLAMA_API}/generate`, {
-      model,
-      prompt: fullPrompt,
-      stream: false,
+    // Set response headers for streaming
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    // Make a streaming request to Ollama
+    const response = await axios.post(
+      `${OLLAMA_API}/generate`,
+      {
+        model,
+        prompt: fullPrompt,
+        stream: true,
+      },
+      {
+        responseType: "stream",
+      }
+    );
+
+    // Stream the response back to the client
+    response.data.on("data", (chunk) => {
+      try {
+        const data = JSON.parse(chunk.toString());
+        if (data.response) {
+          res.write(`data: ${JSON.stringify({ chunk: data.response })}\n\n`);
+        }
+      } catch (error) {
+        console.error("Error parsing chunk:", error);
+      }
     });
 
-    return res.json({ response: response.data.response });
+    response.data.on("end", () => {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.end();
+    });
+
+    response.data.on("error", (error) => {
+      console.error("Stream error:", error);
+      res.end();
+    });
   } catch (error) {
     console.error("Error calling Ollama API:", error.message);
     return res.status(500).json({
@@ -60,8 +96,12 @@ Your goal is to make users feel valued and well-cared for, as if they were guest
 
 // Test endpoint
 app.get("/api/test", (req, res) => {
-  res.json({ message: "Backend is running!" });
+  console.log("Test endpoint hit");
+  return res.status(200).json({ message: "Backend is running!" });
 });
+
+// Options for preflight requests
+app.options('*', cors());
 
 // Models list endpoint
 app.get("/api/models", async (req, res) => {

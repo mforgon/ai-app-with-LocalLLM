@@ -5,9 +5,23 @@ import { useState, useEffect } from "react";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  id?: string; // Optional ID to track messages during streaming
 }
 
 export default function ChatInterface() {
+  // CSS for the blinking cursor
+  const cursorStyle = `
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .typing-cursor {
+      display: inline-block;
+      animation: blink 1s step-end infinite;
+      margin-left: 2px;
+    }
+  `;
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -17,7 +31,7 @@ export default function ChatInterface() {
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const response = await fetch("http://localhost:5001/api/test");
+        const response = await fetch(`${process.env.NEXT_PUBLIC_APP_API_URL}/test`);
         if (response.ok) {
           setIsBackendConnected(true);
         } else {
@@ -41,9 +55,16 @@ export default function ChatInterface() {
     setInput("");
     setIsLoading(true);
 
+    // Add an empty assistant message that will be updated as the stream comes in
+    const assistantMessageId = Date.now().toString();
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "", id: assistantMessageId },
+    ]);
+
     try {
       const response = await fetch(
-        "http://localhost:5001/api/intelligence/chat",
+          `${process.env.NEXT_PUBLIC_APP_API_URL}/intelligence/chat`,
         {
           method: "POST",
           headers: {
@@ -56,33 +77,73 @@ export default function ChatInterface() {
         }
       );
 
-      const data = await response.json();
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: data.response,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Response body is not readable");
+
+      let accumulatedContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Convert the chunk to text
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split("\n\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.substring(6));
+              
+              if (data.chunk) {
+                // Append the new chunk to the accumulated content
+                accumulatedContent += data.chunk;
+                
+                // Update the assistant message with the accumulated content
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  )
+                );
+              }
+              
+              if (data.done) {
+                // Stream is complete
+                setIsLoading(false);
+              }
+            } catch (e) {
+              console.error("Error parsing SSE data:", e);
+            }
+          }
+        }
+      }
     } catch (error) {
       console.error("Error:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Sorry, there was an error processing your request.",
-        },
-      ]);
-    } finally {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId
+            ? {
+                ...msg,
+                content: "Sorry, there was an error processing your request.",
+              }
+            : msg
+        )
+      );
       setIsLoading(false);
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto p-5 h-screen flex flex-col">
+      <style dangerouslySetInnerHTML={{ __html: cursorStyle }} />
       {!isBackendConnected && (
         <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-5 text-center">
           <p>
             ⚠️ Cannot connect to backend server. Please make sure it&apos;s
-            running at http://localhost:5001
+            running at {process.env.NEXT_PUBLIC_APP_API_URL}
           </p>
           <p>Also ensure Ollama is running with the llama3.1:latest model.</p>
         </div>
@@ -113,7 +174,12 @@ export default function ChatInterface() {
             <div className="font-medium mb-1">
               {message.role === "user" ? "You:" : "Concierge:"}
             </div>
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            <p className="whitespace-pre-wrap">
+              {message.content}
+              {isLoading && message.role === "assistant" && message.id && (
+                <span className="typing-cursor">|</span>
+              )}
+            </p>
           </div>
         ))}
         {isLoading && (
