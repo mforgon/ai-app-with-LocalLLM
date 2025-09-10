@@ -2,9 +2,10 @@ import express from "express";
 import cors from "cors";
 import axios from "axios";
 import dotenv from "dotenv";
-import {testConnection } from "./config/database.js";
+import { testConnection } from "./config/database.js";
 import { syncDatabase } from "./models/index.js";
 import amenitiesRoutes from "./routes/amenities.js";
+import faqRoutes from "./routes/faqs.js";
 
 dotenv.config();
 
@@ -34,17 +35,34 @@ app.post("/api/intelligence/chat", async (req, res) => {
     }
 
     console.log(`Sending request to Ollama API with model: ${model}`);
-    
-    // Fetch amenities data from the database
-    const Amenity = (await import('./models/Amenity.js')).default;
-    const amenities = await Amenity.findAll();
-    
-    // Format amenities data for the system prompt
-    const amenitiesData = amenities.map(amenity => {
-      return `- ${amenity.name}: ${amenity.description} (Category: ${amenity.category}, Location: ${amenity.location || 'Not specified'}, Available: ${amenity.availability ? 'Yes' : 'No'})`;
-    }).join('\n');
 
-    // Add hospitality-focused system prompt with amenities data
+    // Fetch amenities data from the database
+    const Amenity = (await import("./models/Amenity.js")).default;
+    const amenities = await Amenity.findAll();
+
+    // Format amenities data for the system prompt
+    const amenitiesData = amenities
+      .map((amenity) => {
+        return `- ${amenity.name}: ${amenity.description} (Category: ${
+          amenity.category
+        }, Location: ${amenity.location || "Not specified"}, Available: ${
+          amenity.availability ? "Yes" : "No"
+        })`;
+      })
+      .join("\n");
+
+    // Fetch FAQs data from the database
+    const FAQ = (await import("./models/FAQ.js")).default;
+    const faqs = await FAQ.findAll();
+
+    // Format FAQs data for the system prompt
+    const faqsData = faqs
+      .map((faq) => {
+        return `Question: ${faq.question}\nAnswer: ${faq.answer}`;
+      })
+      .join("\n\n");
+
+    // Add hospitality-focused system prompt with amenities and FAQs data
     const systemPrompt = `You are a professional hospitality concierge assistant. Your tone is warm, helpful, and courteous. 
 
 You should:
@@ -61,7 +79,10 @@ Your goal is to make users feel valued and well-cared for, as if they were guest
 Here is the current list of amenities available at our property:
 ${amenitiesData}
 
-When users ask about amenities, provide accurate information based on the above list. If they ask about an amenity not on the list, you can politely inform them that it's not currently listed in our system and offer to check with the staff for more information.
+Here are some frequently asked questions and their answers:
+${faqsData}
+
+When users ask about amenities or have common questions, provide accurate information based on the above lists. If they ask about something not on the list, you can politely inform them that it's not currently listed in our system and offer to check with the staff for more information.
 
 IMPORTANT RESTRICTIONS:
 - ONLY answer questions related to hospitality, hotel services, local attractions, and travel information
@@ -132,6 +153,7 @@ app.options("*", cors());
 
 // API routes
 app.use("/api/amenities", amenitiesRoutes);
+app.use("/api/faqs", faqRoutes);
 
 // Start the server
 app.listen(PORT, async () => {
@@ -139,10 +161,10 @@ app.listen(PORT, async () => {
   console.log(`Ollama API endpoint: ${OLLAMA_API}`);
   console.log(`Make sure Ollama is running with the llama3.1:latest model`);
   console.log(`You can pull it using: ollama pull llama3.1:latest`);
-  
+
   // Test database connection
   await testConnection();
-  
+
   // Sync database models
   await syncDatabase();
 });

@@ -1,5 +1,5 @@
-import { sequelize } from '../config/database.js';
-import Amenity from './Amenity.js';
+import { sequelize } from "../config/database.js";
+import Amenity from "./Amenity.js";
 
 // Initialize models
 const models = {
@@ -10,9 +10,9 @@ const models = {
 const syncDatabase = async () => {
   try {
     await sequelize.sync({ alter: true });
-    console.log('All models were synchronized successfully.');
+    console.log("All models were synchronized successfully.");
   } catch (error) {
-    console.error('Error synchronizing models:', error);
+    console.error("Error synchronizing models:", error);
   }
 };
 

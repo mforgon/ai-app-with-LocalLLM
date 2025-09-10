@@ -8,6 +8,13 @@ interface Message {
   id?: string; // Optional ID to track messages during streaming
 }
 
+interface FAQ {
+  id: number;
+  question: string;
+  answer: string;
+  category: string;
+}
+
 export default function ChatInterface() {
   // CSS for the blinking cursor
   const cursorStyle = `
@@ -26,14 +33,24 @@ export default function ChatInterface() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isBackendConnected, setIsBackendConnected] = useState(true);
+  const [faqs, setFaqs] = useState<FAQ[]>([]);
 
-  // Check if backend is running
+  // Check if backend is running and fetch FAQs
   useEffect(() => {
-    const checkBackend = async () => {
+    const checkBackendAndFetchFaqs = async () => {
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_APP_API_URL}/test`);
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_APP_API_URL}/test`
+        );
         if (response.ok) {
           setIsBackendConnected(true);
+          const faqsResponse = await fetch(
+            `${process.env.NEXT_PUBLIC_APP_API_URL}/faqs`
+          );
+          if (faqsResponse.ok) {
+            const faqsData = await faqsResponse.json();
+            setFaqs(faqsData);
+          }
         } else {
           setIsBackendConnected(false);
         }
@@ -43,8 +60,160 @@ export default function ChatInterface() {
       }
     };
 
-    checkBackend();
+    checkBackendAndFetchFaqs();
   }, []);
+
+  const handleFaqClick = async (question: string) => {
+    // Add the question as a user message
+    const userMessage: Message = { role: "user", content: question };
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    // Add an empty assistant message that will be updated as the stream comes in
+    const assistantMessageId = Date.now().toString();
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "", id: assistantMessageId },
+    ]);
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_APP_API_URL}/intelligence/chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt: question,
+            model: "llama3.1:latest",
+          }),
+        }
+      );
+
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Response body is not readable");
+
+      let accumulatedContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Convert the chunk to text
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split("\n\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.substring(6));
+
+              if (data.chunk) {
+                // Append the new chunk to the accumulated content
+                accumulatedContent += data.chunk;
+
+                // Update the assistant message with the accumulated content
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  )
+                );
+              }
+
+              if (data.done) {
+                // Stream is complete
+                setIsLoading(false);
+              }
+            } catch (e) {
+              console.error("Error parsing SSE data:", e);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId
+            ? {
+                ...msg,
+                content: "Sorry, there was an error processing your request.",
+              }
+            : msg
+        )
+      );
+      setIsLoading(false);
+    }
+  };
+
+  // Function to generate relevant questions based on conversation context
+  const generateRelevantQuestions = (conversation: Message[]): string[] => {
+    // This is a simple implementation - in a real app, you might use AI to generate these
+    // or have a more sophisticated algorithm to determine relevant questions
+
+    // Default questions for any conversation
+    const defaultQuestions = [
+      "What amenities are available at the hotel?",
+      "What are the dining options?",
+      "Is there a shuttle service to nearby attractions?",
+    ];
+
+    // If the conversation is about dining, suggest dining-related questions
+    if (
+      conversation.some(
+        (msg) =>
+          msg.content.toLowerCase().includes("restaurant") ||
+          msg.content.toLowerCase().includes("dining") ||
+          msg.content.toLowerCase().includes("food") ||
+          msg.content.toLowerCase().includes("breakfast")
+      )
+    ) {
+      return [
+        "What are the restaurant opening hours?",
+        "Do you offer room service?",
+        "Are there vegetarian or vegan options available?",
+      ];
+    }
+
+    // If the conversation is about amenities, suggest amenity-related questions
+    if (
+      conversation.some(
+        (msg) =>
+          msg.content.toLowerCase().includes("pool") ||
+          msg.content.toLowerCase().includes("gym") ||
+          msg.content.toLowerCase().includes("spa") ||
+          msg.content.toLowerCase().includes("amenities")
+      )
+    ) {
+      return [
+        "What are the pool hours?",
+        "Does the gym have personal trainers?",
+        "How can I book a spa treatment?",
+      ];
+    }
+
+    // If the conversation is about check-in/check-out, suggest related questions
+    if (
+      conversation.some(
+        (msg) =>
+          msg.content.toLowerCase().includes("check-in") ||
+          msg.content.toLowerCase().includes("check-out") ||
+          msg.content.toLowerCase().includes("luggage")
+      )
+    ) {
+      return [
+        "Is early check-in available?",
+        "Can I request a late check-out?",
+        "Do you offer luggage storage?",
+      ];
+    }
+
+    return defaultQuestions;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +233,7 @@ export default function ChatInterface() {
 
     try {
       const response = await fetch(
-          `${process.env.NEXT_PUBLIC_APP_API_URL}/intelligence/chat`,
+        `${process.env.NEXT_PUBLIC_APP_API_URL}/intelligence/chat`,
         {
           method: "POST",
           headers: {
@@ -95,11 +264,11 @@ export default function ChatInterface() {
           if (line.startsWith("data: ")) {
             try {
               const data = JSON.parse(line.substring(6));
-              
+
               if (data.chunk) {
                 // Append the new chunk to the accumulated content
                 accumulatedContent += data.chunk;
-                
+
                 // Update the assistant message with the accumulated content
                 setMessages((prev) =>
                   prev.map((msg) =>
@@ -109,7 +278,7 @@ export default function ChatInterface() {
                   )
                 );
               }
-              
+
               if (data.done) {
                 // Stream is complete
                 setIsLoading(false);
@@ -160,26 +329,69 @@ export default function ChatInterface() {
               assistance.
             </p>
             <p>How may I help you today?</p>
+            <div className="mt-5">
+              <h3 className="font-semibold mb-2">
+                Frequently Asked Questions:
+              </h3>
+              <div className="space-y-2">
+                {faqs.slice(0, 3).map((faq) => (
+                  <button
+                    key={faq.id}
+                    onClick={() => handleFaqClick(faq.question)}
+                    className="w-full text-left p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-100"
+                  >
+                    {faq.question}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
         {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`mb-4 p-3 rounded-lg ${
-              message.role === "user"
-                ? "bg-blue-600 text-white ml-[20%]"
-                : "bg-gray-200 text-gray-800 mr-[20%]"
-            }`}
-          >
-            <div className="font-medium mb-1">
-              {message.role === "user" ? "You:" : "Concierge:"}
+          <div key={index}>
+            <div
+              className={`mb-4 p-3 rounded-lg ${
+                message.role === "user"
+                  ? "bg-blue-600 text-white ml-[20%]"
+                  : "bg-gray-200 text-gray-800 mr-[20%]"
+              }`}
+            >
+              <div className="font-medium mb-1">
+                {message.role === "user" ? "You:" : "Concierge:"}
+              </div>
+              <p className="whitespace-pre-wrap">
+                {message.content}
+                {isLoading && message.role === "assistant" && message.id && (
+                  <span className="typing-cursor">|</span>
+                )}
+              </p>
             </div>
-            <p className="whitespace-pre-wrap">
-              {message.content}
-              {isLoading && message.role === "assistant" && message.id && (
-                <span className="typing-cursor">|</span>
+
+            {/* Show relevant questions after assistant responses */}
+            {message.role === "assistant" &&
+              message.content &&
+              index === messages.length - 1 &&
+              !isLoading && (
+                <div className="mb-6 mt-2">
+                  <p className="text-sm text-gray-500 mb-2">
+                    Related questions you might want to ask:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {/* Generate relevant questions based on the current conversation context */}
+                    {generateRelevantQuestions(messages).map(
+                      (question, qIndex) => (
+                        <button
+                          key={qIndex}
+                          onClick={() => handleFaqClick(question)}
+                          className="text-sm text-left  text-gray-600 p-2  bg-white border border-gray-200 rounded-lg hover:bg-gray-100"
+                        >
+                          {question}
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
               )}
-            </p>
           </div>
         ))}
         {isLoading && (
